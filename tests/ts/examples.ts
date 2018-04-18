@@ -206,6 +206,9 @@ class Movie extends objection.Model {
   };
 }
 
+const cols1: string[] = Person.tableMetadata().columns;
+const cols2: Promise<objection.TableMetadata> = Person.fetchTableMetadata();
+
 function takesMovie(m: Movie) {
   m.title = '';
 }
@@ -433,6 +436,12 @@ const rowsEager: Promise<Person[]> = Person.query()
   .eagerAlgorithm(Person.NaiveEagerAlgorithm)
   .eager('foo.bar');
 
+const rowsEager2: Promise<Person[]> = Person.query().eager({
+  foo: {
+    bar: true
+  }
+});
+
 const children: Promise<Person[]> = Person.query()
   .skipUndefined()
   .allowEager('[pets, parent, children.[pets, movies.actors], movies.actors.pets]')
@@ -536,6 +545,12 @@ qb = qb.mergeContext({
 });
 
 qb = qb.runBefore(qbcb);
+qb = qb.onBuild(qbcb);
+qb = qb.onBuildKnex((knexBuilder: knex.QueryBuilder, builder: objection.QueryBuilder<Person>) => {
+  if (builder.hasWheres()) {
+    knexBuilder.where('foo', 'bar');
+  }
+});
 
 qb = qb.reject('fail');
 qb = qb.resolve('success');

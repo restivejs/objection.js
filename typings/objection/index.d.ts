@@ -237,6 +237,20 @@ declare namespace Objection {
     [key: string]: any;
   }
 
+  export interface TableMetadata {
+    columns: Array<string>;
+  }
+
+  export interface TableMetadataOptions {
+    table: string;
+  }
+
+  export interface FetchTableMetadataOptions {
+    knex?: knex;
+    force?: boolean;
+    table?: string;
+  }
+
   /**
    * @see http://vincit.github.io/objection.js/#fieldexpression
    */
@@ -245,7 +259,7 @@ declare namespace Objection {
   /**
    * @see http://vincit.github.io/objection.js/#relationexpression
    */
-  type RelationExpression = string;
+  type RelationExpression = string | object;
 
   interface FilterFunction<QM extends Model> {
     (queryBuilder: QueryBuilder<QM, QM[]>): void;
@@ -310,7 +324,7 @@ declare namespace Objection {
 
   interface ModifyEager<QM1 extends Model, RM1, RV1> {
     <QM2 extends Model>(
-      relationExpression: string | RelationExpression,
+      relationExpression: RelationExpression,
       modifier: (builder: QueryBuilder<QM2, QM2[]>) => void
     ): QueryBuilder<QM1, RM1, RV1>;
   }
@@ -403,6 +417,8 @@ declare namespace Objection {
       traverser: TraverserFunction
     ): void;
     traverse(models: Model | Model[], traverser: TraverserFunction): void;
+    tableMetadata(opt?: TableMetadataOptions): TableMetadata;
+    fetchTableMetadata(opt?: FetchTableMetadataOptions): Promise<TableMetadata>;
   }
 
   // TS 2.5 doesn't support interfaces with static methods or fields, so
@@ -484,6 +500,8 @@ declare namespace Objection {
     ): void;
     static traverse(models: Model | Model[], traverser: TraverserFunction): void;
 
+    static tableMetadata(opt?: TableMetadataOptions): TableMetadata;
+    static fetchTableMetadata(opt?: FetchTableMetadataOptions): Promise<TableMetadata>;
     // Implementation note: At least as of TypeScript 2.7, subclasses of
     // methods that return `this` are not compatible with their superclass.
     // For example, `class Movie extends Model` could not be passed as a
@@ -756,6 +774,7 @@ declare namespace Objection {
     runBefore(fn: (result: any, builder: QueryBuilder<QM, any>) => any): this;
     runAfter(fn: (result: any, builder: QueryBuilder<QM, any>) => any): this;
     onBuild(fn: (builder: this) => void): this;
+    onBuildKnex(fn: (knexBuilder: knex.QueryBuilder, builder: this) => void): this;
     onError(fn: (error: Error, builder: this) => any): this;
 
     eagerAlgorithm(algo: EagerAlgorithm): this;

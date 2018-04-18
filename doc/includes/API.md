@@ -880,6 +880,8 @@ The patch object is validated against the model's [`jsonSchema`](#jsonschema) _b
 of the [`jsonSchema`](#jsonschema) is ignored. This way the properties in the patch object are still validated
 but an error isn't thrown if the patch object doesn't contain all required properties.
 
+Values specified using field expressions and literals are not validated.
+
 If validation fails the Promise is rejected with a [`ValidationError`](#validationerror).
 
 NOTE: The return value of the query will be the number of affected rows. If you want to patch a single row and
@@ -3218,7 +3220,7 @@ after [`runBefore`](#runbefore) methods but before [`runAfter`](#runafter) metho
 If you need to modify the SQL query at query build time, this is the place to do it. You shouldn't
 modify the query in any of the `run` methods.
 
-Unlike the run methods these must be synchronous. Also you should not register any run methods
+Unlike the `run` methods (`runAfter`, `runBefore` etc.) these must be synchronous. Also you should not register any `run` methods
 from these. You should _only_ call the query building methods of the builder provided as a parameter.
 
 ##### Arguments
@@ -3226,6 +3228,52 @@ from these. You should _only_ call the query building methods of the builder pro
 Argument|Type|Description
 --------|----|--------------------
 onBuild|function([`QueryBuilder`](#querybuilder))|The function to be executed.
+
+##### Return value
+
+Type|Description
+----|-----------------------------
+[`QueryBuilder`](#querybuilder)|`this` query builder for chaining.
+
+
+
+
+#### onBuildKnex
+
+```js
+const builder = queryBuilder.onBuildKnex(onBuildKnex);
+```
+
+```js
+const query = Person.query();
+
+query
+ .onBuildKnex((knexBuilder, objectionBuilder) => {
+   knexBuilder.where('id', 1);
+ });
+```
+
+Functions registered with this method are called each time the query is built into an SQL string. This method is ran
+after [`onBuild`](#onbuild) methods but before [`runAfter`](#runafter) methods.
+
+If you need to modify the SQL query at query build time, this is the place to do it in addition to `onBuild`. The only
+difference between `onBuildKnex` and `onBuild` is that in `onBuild` you can modify the objection's query builder. In
+`onBuildKnex` the objection builder has been compiled into a knex query builder and any modifications to the objection
+builder will be ignored.
+
+Unlike the `run`  methods (`runAfter`, `runBefore` etc.) these must be synchronous. Also you should not register any `run` methods
+from these. You should _only_ call the query building methods of the __knexBuilder__ provided as a parameter.
+
+WARNING: You should never call any query building (or any other mutating) method on the `objectionBuilder` in
+         this function. If you do, those calls will get ignored. At this point the query builder has been
+         compiled into a knex query builder and you should only modify that. You can call non mutating methods
+         like `hasSelects`, `hasWheres` etc. on the objection builder.
+
+##### Arguments
+
+Argument|Type|Description
+--------|----|--------------------
+onBuildKnex|function(`KnexQueryBuilder`, [`QueryBuilder`](#querybuilder))|The function to be executed.
 
 ##### Return value
 
@@ -5727,6 +5775,10 @@ console.log('anyone over 90 is now removed from the database');
 
 Creates a query builder for the model's table.
 
+All query builders are created using this function, including $query, $relatedQuery and relatedQuery.
+That means you can modify each query by overriding this method for your model class. This is especially
+useful when combined with the use of [`onBuild`](#onbuild).
+
 See the [query examples](#query-examples) section for more examples.
 
 ##### Arguments
@@ -5781,7 +5833,17 @@ const peopleThatHavePets = await Person
   .whereExists(Person.relatedQuery('pets'));
 ```
 
+> Generates something like this:
+
+```sql
+select "persons".* from "persons" where exists (select "pets".* from "animals" as "pets" where "pets"."ownerId" = "persons"."id")
+```
+
 Creates a subquery to a relation.
+
+This query can only be used as a subquery and therefore there is no need to ever pass
+a transaction or a knex instance to it. It will always inherit its parent query's
+transaction because it is compiled and executed as a part of the parent query.
 
 ##### Arguments
 
@@ -6321,6 +6383,84 @@ string|The column name
 
 
 
+#### fetchTableMetadata
+
+```js
+const metadata = await Person.fetchTableMetadata(opt);
+```
+
+Fetches and caches the table metadata.
+
+Most of the time objection doesn't need this metadata, but some methods like `joinEager` do. This
+method is called by objection when the metadata is needed. The result is cached and after the first
+call the cached promise is returned and no queries are executed.
+
+Because objection uses this on demand, the first query that needs this information can have
+unpredicable performance. If that's a problem, you can call this method for each of your models
+during your app's startup.
+
+If you've implemented [`tableMetadata`](#tablemetadata) method to return a custom metadata object,
+this method doesn't execute database queries, but returns `Promise.resolve(this.tableMetadata())`
+instead.
+
+##### Arguments
+
+Argument|Type|Description
+--------|----|-------------------
+opt|[`TableMetadataFetchOptions`](#tablemetadatafetchoptions)|Optional options
+
+##### Return value
+
+Type|Description
+----|-----------------------------
+Promise&lt;[`TableMetadata`](#tablemetadata-prop)&gt;|The table metadata object
+
+
+
+
+
+
+#### tableMetadata
+
+```js
+const metadata = Person.tableMetadata(opt);
+```
+
+> A custom override that uses the property information in `jsonSchema`.
+
+```js
+class Person extends Model {
+  static tableMetadata() {
+    return {
+      columns: Object.keys(this.jsonSchema.properties)
+    };
+  }
+}
+```
+
+Synchronously returns the table metadata object from the cache.
+
+You can override this method to return a custom object if you don't want objection to use
+[`fetchTableMetadata`](#fetchtablemetadata).
+
+See [`fetchTableMetadata`](#fetchtablemetadata) for more information.
+
+##### Arguments
+
+Argument|Type|Description
+--------|----|-------------------
+opt|[`TableMetadataOptions`](#tablemetadataoptions)|Optional options
+
+##### Return value
+
+Type|Description
+----|-----------------------------
+[`TableMetadata`](#tablemetadata-prop)|The table metadata object
+
+
+
+
+
 
 ### Instance methods
 
@@ -6436,7 +6576,7 @@ const jsonObj = modelInstance.$toJson(opt);
 ```
 
 ```js
-const shallowObj = modelInstance.$toJson({shallow: true});
+const shallowObj = modelInstance.$toJson({shallow: true, virtuals: true});
 ```
 
 Exports this model as a JSON object.
@@ -6445,7 +6585,7 @@ Exports this model as a JSON object.
 
 Argument|Type|Description
 --------|----|--------------------
-opt|[`CloneOptions`](#cloneoptions)|Optional options
+opt|[`ToJsonOptions`](#tojsonoptions)|Optional options
 
 ##### Return value
 
@@ -6463,7 +6603,7 @@ const jsonObj = modelInstance.toJSON(opt);
 ```
 
 ```js
-const shallowObj = modelInstance.toJSON({shallow: true});
+const shallowObj = modelInstance.toJSON({shallow: true, virtuals: true});
 ```
 
 Exports this model as a JSON object.
@@ -6472,7 +6612,7 @@ Exports this model as a JSON object.
 
 Argument|Type|Description
 --------|----|--------------------
-opt|[`CloneOptions`](#cloneoptions)|Optional options
+opt|[`ToJsonOptions`](#tojsonoptions)|Optional options
 
 ##### Return value
 
@@ -7830,6 +7970,87 @@ the `^` character. For example `parent.^3` is equal to `parent.parent.parent`.
 
 Relations can be aliased using the `as` keyword.
 
+### RelationExpression object notation
+
+> The string expression in the comment is equivalent to the object expression below it:
+
+```js
+// `children`
+{
+  children: true
+}
+```
+
+```js
+// `children.movies`
+{
+  children: {
+    movies: true
+  }
+}
+```
+
+```js
+// `[children, pets]`
+{
+  children: true
+  pets: true
+}
+```
+
+```js
+// `[children.[movies, pets], pets]`
+{
+  children: {
+    movies: true,
+    pets: true
+  }
+  pets: true
+}
+```
+
+```js
+// `parent.^`
+{
+  parent: {
+    $recursive: true
+  }
+}
+```
+
+```js
+// `parent.^5`
+{
+  parent: {
+    $recursive: 5
+  }
+}
+```
+
+```js
+// `parent.*`
+{
+  parent: {
+    $allRecursive: true
+  }
+}
+```
+
+```js
+// `[children as kids, pets(filterDogs) as dogs]`
+{
+  kids: {
+    $relation: 'children'
+  },
+
+  dogs: {
+    $relation: 'pets',
+    $modify: ['filterDogs']
+  }
+}
+```
+
+In addition to the string expressions, a more verbose object notation can also be used.
 
 ## Validator
 
@@ -8050,6 +8271,17 @@ shallow|boolean|If true, relations are ignored
 
 
 
+
+## ToJsonOptions
+
+Property|Type|Description
+--------|----|-----------
+shallow|boolean|If true, relations are ignored. Default is false.
+virtuals|boolean|If false, virtual attributes are omitted from the output. Default is true.
+
+
+
+
 ## EagerOptions
 
 Property|Type|Description
@@ -8081,6 +8313,25 @@ noUnrelate|boolean&#124;string[]|If true, no unrelate operations are performed. 
 Property|Type|Description
 --------|----|-----------
 relate|boolean&#124;string[]|If true, models with an `id` are related instead of inserted. Relate functionality can be enabled for a subset of relations of the graph by providing a list of relation expressions. See the examples [here](#graph-inserts).
+
+## TableMetadataFetchOptions
+
+Property|Type|Description
+--------|----|-----------
+table|string|A custom table name. If not given, Model.tableName is used.
+knex|knex&#124;Transaction|A knex instance or a transaction
+
+## TableMetadataOptions
+
+Property|Type|Description
+--------|----|-----------
+table|string|A custom table name. If not given, Model.tableName is used.
+
+<h2 id="tablemetadata-prop">TableMetadata</h2>
+
+Property|Type|Description
+--------|----|-----------
+columns|string[]|Names of all the columns in a table.
 
 ## Relation
 
