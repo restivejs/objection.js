@@ -20,6 +20,7 @@ describe('integration tests', () => {
       connection: {
         host: '127.0.0.1',
         user: 'objection',
+        password: 'P@ssw0rd',
         database: 'objection_test'
       },
       pool: {
@@ -40,7 +41,7 @@ describe('integration tests', () => {
         database: 'objection_test'
       }
     }
-  ];
+  ].filter(({ client }) => client === 'mysql');
 
   const sessions = testDatabaseConfigs.map(knexConfig => {
     const session = new TestSession({
